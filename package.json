@@ -11,6 +11,7 @@
     "format": "prettier --write \"**/*.{js,ts,vue,scss,html,md,json}\" --ignore-path .gitignore",
     "test": "echo \"No test specified\" && exit 0",
     "dev": "quasar dev",
+    "typecheck": "vue-tsc --noEmit",
     "build": "quasar build",
     "postinstall": "quasar prepare"
   },
@@ -44,7 +45,7 @@
     "typescript": "^5.9.2",
     "vite-plugin-checker": "^0.11.0",
     "vue-eslint-parser": "^10.2.0",
-    "vue-tsc": "^3.0.7"
+    "vue-tsc": "^3.2.5"
   },
   "engines": {
     "node": "^28 || ^26 || ^24 || ^22 || ^20",
