@@ -100,10 +100,27 @@
               :loading="refreshing"
               @click="onRefresh"
             />
+
+            <q-separator vertical inset class="q-mx-sm gt-xs" />
+
+            <q-btn
+              v-if="!auth.isAuthenticated"
+              outline
+              color="primary"
+              icon="login"
+              label="Admin login"
+              @click="goLogin"
+            />
+            <template v-else>
+              <q-chip dense class="bg-grey-2 text-grey-9">
+                <q-icon name="verified_user" class="q-mr-xs" />
+                {{ roleLabel }}
+              </q-chip>
+              <q-btn outline color="primary" icon="logout" label="Logout" @click="logout" />
+            </template>
           </div>
         </q-toolbar>
 
-        <!-- inline banner for branch loading errors / empty -->
         <q-slide-transition>
           <div v-if="showBranchBanner" class="q-mt-sm">
             <q-banner rounded dense inline-actions :class="branchBannerClass" class="banner">
@@ -132,23 +149,38 @@
     </q-header>
 
     <q-page-container>
-      <q-page class="q-pa-md">
-        <div class="page-shell">
-          <booking-calendar :branch-id="branchStore.selectedBranchId" :refresh-key="refreshKey" />
-        </div>
-      </q-page>
+      <!-- ✅ IMPORTANT: pages (IndexPage/LoginPage/etc) provide <q-page>, not the layout -->
+      <router-view />
     </q-page-container>
   </q-layout>
 </template>
 
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
-import BookingCalendar from 'components/booking-calendar/BookingCalendar.vue';
+import { useRouter } from 'vue-router';
 import { useBranchStore } from 'src/stores/branchStore';
+import { useAuthStore } from 'src/stores/authStore';
 
 defineOptions({ name: 'MainLayout' });
 
+const router = useRouter();
 const branchStore = useBranchStore();
+const auth = useAuthStore();
+
+const roleLabel = computed(() => {
+  if (auth.hasRole('ROLE_ADMIN')) return 'Admin';
+  if (auth.hasRole('ROLE_STAFF')) return 'Staff';
+  return 'Signed in';
+});
+
+function goLogin() {
+  void router.push('/login');
+}
+
+function logout() {
+  auth.logout();
+  void router.replace('/');
+}
 
 const refreshKey = ref(0);
 const refreshing = ref(false);
@@ -217,11 +249,6 @@ onMounted(async () => {
 </script>
 
 <style scoped>
-.page-shell {
-  max-width: 1400px;
-  margin: 0 auto;
-}
-
 .hdr {
   border-bottom: 1px solid rgba(0, 0, 0, 0.06);
 }

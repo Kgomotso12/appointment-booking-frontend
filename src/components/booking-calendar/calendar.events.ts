@@ -8,7 +8,7 @@ export function statusClass(status: AppointmentStatus) {
   return 'evt-cancelled';
 }
 
-export function isPastAppointment(a: Appointment, tz: string) {
+export function isPastAppointment(a: Pick<Appointment, 'endTime'>, tz: string) {
   const end = DateTime.fromISO(a.endTime, { setZone: true }).setZone(tz);
   return end.isValid && end < DateTime.now().setZone(tz);
 }
@@ -16,13 +16,18 @@ export function isPastAppointment(a: Appointment, tz: string) {
 export function toCalendarEvents(items: Appointment[], tz: string) {
   return items.map((a): EventInput => {
     const past = isPastAppointment(a, tz);
+
     return {
       id: String(a.id),
       start: a.startTime,
       end: a.endTime,
       title: '',
       editable: a.status !== 'CANCELLED' && !past,
-      classNames: [statusClass(a.status), ...(past ? ['evt-past'] : [])],
+      classNames: [
+        statusClass(a.status),
+        ...(past ? ['evt-past'] : []),
+        ...(a.status === 'CANCELLED' ? ['evt-greyed'] : []),
+      ],
       extendedProps: { status: a.status, isPast: past },
     };
   });

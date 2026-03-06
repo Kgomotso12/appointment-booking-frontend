@@ -1,5 +1,6 @@
 import type {
   Appointment,
+  AppointmentMinimal,
   AppointmentNotification,
   CreateAppointmentPayload,
   RescheduleAppointmentPayload,
@@ -15,18 +16,31 @@ export async function listAppointmentsByBranch(branchId: string): Promise<Appoin
 
 export async function getAppointmentsRange(params: {
   branchId: string;
-  from: string; // YYYY-MM-DD
-  to: string; // YYYY-MM-DD
+  from: string;
+  to: string;
 }): Promise<Appointment[]> {
-  const res = await http.get<Appointment[]>('/v1/appointments/range', {
-    params,
-  });
+  const res = await http.get<Appointment[]>('/v1/appointments/range', { params });
+  return res.data;
+}
 
+export async function getAppointmentsViewRange(params: {
+  branchId: string;
+  from: string;
+  to: string;
+}): Promise<AppointmentMinimal[]> {
+  const res = await http.get<AppointmentMinimal[]>('/v1/appointments/public/range', { params });
   return res.data;
 }
 
 export async function getAppointment(id: string): Promise<Appointment> {
   const res = await http.get<Appointment>(`/v1/appointments/${encodeURIComponent(id)}`);
+  return res.data;
+}
+
+export async function getAppointmentPublic(token: string): Promise<AppointmentMinimal> {
+  const res = await http.get<AppointmentMinimal>(
+    `/v1/appointments/public/${encodeURIComponent(token)}/appointment`,
+  );
   return res.data;
 }
 
@@ -56,9 +70,15 @@ export async function cancelAppointment(id: string): Promise<Appointment> {
   return res.data;
 }
 
-export async function getAppointmentNotifications(id: string): Promise<AppointmentNotification[]> {
+export async function cancelAppointmentPublic(token: string): Promise<void> {
+  await http.patch(`/v1/appointments/cancel-public/${encodeURIComponent(token)}`);
+}
+
+export async function getAppointmentNotifications(
+  appointmentId: string,
+): Promise<AppointmentNotification[]> {
   const res = await http.get<AppointmentNotification[]>(
-    `/v1/notifications/${encodeURIComponent(id)}`,
+    `/v1/notifications/${encodeURIComponent(appointmentId)}`,
   );
   return res.data;
 }
