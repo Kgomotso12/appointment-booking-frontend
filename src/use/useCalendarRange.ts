@@ -7,11 +7,14 @@ import {
   buildAppointmentMap,
   toCalendarEvents,
 } from 'src/components/booking-calendar/calendar.events';
-import { getAppointmentsRange } from 'src/services/appointment.api';
+import { getAppointmentsRange, getAppointmentsViewRange } from 'src/services/appointment.api';
+
+export type CalendarDataMode = 'public' | 'admin';
 
 export function useCalendarRange(args: {
   tz: string;
   branchId: () => string | null;
+  mode: () => CalendarDataMode;
   fcRef: { value: InstanceType<typeof FullCalendar> | null };
 }) {
   const events = ref<EventInput[]>([]);
@@ -33,7 +36,13 @@ export function useCalendarRange(args: {
 
     eventsLoading.value = true;
     try {
-      const items = await getAppointmentsRange({ branchId, from, to });
+      const mode = args.mode();
+
+      const items =
+        mode === 'admin'
+          ? await getAppointmentsRange({ branchId, from, to })
+          : await getAppointmentsViewRange({ branchId, from, to });
+
       if (seq !== fetchSeq) return;
 
       appointmentById.value = buildAppointmentMap(items);

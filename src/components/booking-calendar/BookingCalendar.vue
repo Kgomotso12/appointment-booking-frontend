@@ -67,6 +67,8 @@
     <ViewAppointmentDialog
       v-model="viewOpen"
       :appointment-id="viewAppointmentId"
+      :appointment="viewAppointmentId ? (appointmentById.get(viewAppointmentId) ?? null) : null"
+      :manage-token="props.manageToken ?? null"
       :branch-label="branchLabel"
       :tz="TZ"
       @changed="onChanged"
@@ -93,6 +95,7 @@ import type {
 import type { EventResizeDoneArg } from '@fullcalendar/interaction';
 
 import { useBranchStore } from 'src/stores/branchStore';
+import { useAuthStore } from 'src/stores/authStore';
 import type { Appointment, AppointmentStatus, CreateAppointmentPayload } from 'src/types/domain';
 
 import CreateAppointmentDialog from '../dialog/CreateAppointmentDialog.vue';
@@ -102,10 +105,11 @@ import {
   rescheduleAppointment,
   confirmAppointment as apiConfirmAppointment,
   cancelAppointment as apiCancelAppointment,
+  getAppointmentPublic,
 } from 'src/services/appointment.api';
 import { useAppointments } from 'src/use/useAppointments';
 
-import { useCalendarRange } from 'src/use/useCalendarRange';
+import { useCalendarRange, type CalendarDataMode } from 'src/use/useCalendarRange';
 import { useCalendarTitle } from './calendar.title';
 import { useCalendarNavigation } from 'src/use/useCalendarNavigation';
 import { eventTimeOnlyContent, isPastSlot, isPastAppointment } from './calendar.events';
@@ -115,9 +119,13 @@ defineOptions({ name: 'BookingCalendar' });
 const props = defineProps<{
   branchId: string | null;
   refreshKey: number;
+  manageToken?: string | null;
 }>();
 
 const TZ = 'Africa/Johannesburg';
+
+const auth = useAuthStore();
+const isAdmin = computed(() => auth.isAuthenticated && auth.isStaffOrAdmin);
 
 const branchStore = useBranchStore();
 const fcRef = ref<InstanceType<typeof FullCalendar> | null>(null);
@@ -160,13 +168,77 @@ const emptyBody = computed(() => {
 const { calendarTitle, syncTitle } = useCalendarTitle(fcRef);
 const { goPrev, goNext, goToday, clearSelection } = useCalendarNavigation(fcRef, syncTitle);
 
+const manageMode = computed(
+  () => typeof props.manageToken === 'string' && props.manageToken.length > 0,
+);
+
+const allowSelect = computed(() => !manageMode.value);
+const allowEdit = computed(() => !manageMode.value && isAdmin.value);
+
+const dataMode = computed<CalendarDataMode>(() => {
+  if (manageMode.value) return 'public';
+  if (isAdmin.value) return 'admin';
+  return 'public';
+});
+
 const { events, appointmentById, fetchAppointments, onDatesSet } = useCalendarRange({
   tz: TZ,
   branchId: () => props.branchId,
+  mode: () => dataMode.value,
   fcRef,
 });
 
 const eventContent = eventTimeOnlyContent(TZ);
+
+const manageTargetAppointmentId = ref<string | null>(null);
+const manageAutoOpened = ref(false);
+
+async function loadManageTarget() {
+  manageTargetAppointmentId.value = null;
+  manageAutoOpened.value = false;
+
+  if (!manageMode.value || !props.manageToken) return;
+
+  const appointment = await getAppointmentPublic(props.manageToken);
+  manageTargetAppointmentId.value = appointment?.id != null ? String(appointment.id) : null;
+}
+
+watch(
+  () => [props.manageToken, props.branchId],
+  async () => {
+    try {
+      await loadManageTarget();
+    } finally {
+      void fetchAppointments();
+    }
+  },
+  { immediate: true },
+);
+
+watch(
+  () => [
+    manageMode.value,
+    manageTargetAppointmentId.value,
+    props.branchId,
+    props.refreshKey,
+    events.value.length,
+  ],
+  async () => {
+    if (!manageMode.value) return;
+    if (manageAutoOpened.value) return;
+
+    const targetId = manageTargetAppointmentId.value;
+    if (!targetId) return;
+
+    if (!appointmentById.value.has(targetId)) return;
+
+    await nextTick();
+    viewAppointmentId.value = targetId;
+    viewOpen.value = true;
+    manageAutoOpened.value = true;
+  },
+  { immediate: true },
+);
 
 type UpsertMode = 'create' | 'edit';
 const upsertOpen = ref(false);
@@ -192,6 +264,8 @@ function openCreate(preset?: { date: string; startTime: string; endTime: string 
 }
 
 function openEdit(appointmentId: string) {
+  if (!isAdmin.value) return;
+
   const a = appointmentById.value.get(appointmentId);
   if (!a) return;
 
@@ -238,6 +312,8 @@ async function handleCreate(payload: UpsertPayload) {
   createFieldErrors.value = null;
 
   if (upsertMode.value === 'edit' && editingAppointmentId.value && payload.status) {
+    if (!isAdmin.value) return;
+
     statusUpdating.value = true;
     try {
       const id = editingAppointmentId.value;
@@ -297,6 +373,15 @@ function onSelect(info: DateSelectArg) {
 
 function onEventClick(arg: EventClickArg) {
   const id = arg.event.id;
+
+  if (manageMode.value) {
+    if (id !== manageTargetAppointmentId.value) return;
+    openView(id);
+    return;
+  }
+
+  if (!isAdmin.value) return;
+
   const a = appointmentById.value.get(id);
   if (!a) return;
 
@@ -313,6 +398,9 @@ function onEventClick(arg: EventClickArg) {
 async function handleRescheduleEvent(arg: {
   event: { id: string; start: Date | null; end: Date | null };
 }) {
+  if (!isAdmin.value) return;
+  if (manageMode.value) return;
+
   const id = arg.event.id;
   const start = arg.event.start;
   const end = arg.event.end;
@@ -338,46 +426,98 @@ async function onEventResize(arg: EventResizeDoneArg) {
   await handleRescheduleEvent(arg);
 }
 
-const calendarOptions = computed<CalendarOptions>(() => ({
-  plugins: [dayGridPlugin, timeGridPlugin, interactionPlugin, luxonPlugin],
-  timeZone: TZ,
+function overlapsExisting(start: Date, end: Date) {
+  const s = DateTime.fromJSDate(start).toMillis();
+  const e = DateTime.fromJSDate(end).toMillis();
 
-  initialView: viewMode.value,
-  headerToolbar: false,
+  for (const appt of appointmentById.value.values()) {
+    if (appt.status === 'CANCELLED') continue;
 
-  height: 'auto',
-  expandRows: true,
-  nowIndicator: true,
+    const as = DateTime.fromISO(appt.startTime, { setZone: true }).toMillis();
+    const ae = DateTime.fromISO(appt.endTime, { setZone: true }).toMillis();
 
-  selectable: true,
-  selectMirror: true,
-  select: onSelect,
+    if (s < ae && e > as) return true;
+  }
 
-  editable: true,
-  eventResizableFromStart: true,
+  return false;
+}
 
-  eventClick: onEventClick,
-  eventDrop: (arg) => void onEventDrop(arg),
-  eventResize: (arg) => void onEventResize(arg),
+const renderedEvents = computed(() => {
+  return events.value.map((e) => {
+    const id = String(e.id ?? '');
 
-  selectAllow: (selectInfo) => !isPastSlot(selectInfo.start, TZ),
+    if (isAdmin.value) return e;
 
-  datesSet: (arg: DatesSetArg) => {
-    onDatesSet(arg.start, arg.end);
-    syncTitle();
-  },
+    if (manageMode.value) {
+      const isTarget = id && id === manageTargetAppointmentId.value;
+      return {
+        ...e,
+        editable: false,
+        classNames: isTarget ? ['evt-target'] : ['evt-dimmed'],
+      };
+    }
 
-  allDaySlot: false,
-  slotMinTime: '07:00:00',
-  slotMaxTime: '18:00:00',
-  slotLabelFormat: { hour: '2-digit', minute: '2-digit', hour12: false },
-  eventTimeFormat: { hour: '2-digit', minute: '2-digit', hour12: false },
+    return {
+      ...e,
+      editable: false,
+      classNames: ['evt-public'],
+    };
+  });
+});
 
-  eventContent,
-  events: events.value,
+const calendarOptions = computed<CalendarOptions>(() => {
+  const base: CalendarOptions = {
+    plugins: [dayGridPlugin, timeGridPlugin, interactionPlugin, luxonPlugin],
+    timeZone: TZ,
 
-  dayMaxEvents: true,
-}));
+    initialView: viewMode.value,
+    headerToolbar: false,
+
+    height: 'auto',
+    expandRows: true,
+    nowIndicator: true,
+
+    selectable: allowSelect.value,
+    editable: allowEdit.value,
+    eventResizableFromStart: allowEdit.value,
+
+    selectMirror: true,
+
+    eventClick: onEventClick,
+
+    selectAllow: (selectInfo) => {
+      if (isPastSlot(selectInfo.start, TZ)) return false;
+      if (overlapsExisting(selectInfo.start, selectInfo.end)) return false;
+      return true;
+    },
+
+    datesSet: (arg: DatesSetArg) => {
+      onDatesSet(arg.start, arg.end);
+      syncTitle();
+    },
+
+    allDaySlot: false,
+    slotMinTime: '07:00:00',
+    slotMaxTime: '18:00:00',
+    slotLabelFormat: { hour: '2-digit', minute: '2-digit', hour12: false },
+    eventTimeFormat: { hour: '2-digit', minute: '2-digit', hour12: false },
+
+    eventContent,
+    events: renderedEvents.value,
+    dayMaxEvents: true,
+  };
+
+  if (allowSelect.value) {
+    base.select = onSelect;
+  }
+
+  if (allowEdit.value) {
+    base.eventDrop = (arg) => void onEventDrop(arg);
+    base.eventResize = (arg) => void onEventResize(arg);
+  }
+
+  return base;
+});
 
 watch(viewMode, async (v) => {
   await nextTick();
@@ -390,7 +530,7 @@ watch(viewMode, async (v) => {
 void nextTick(() => syncTitle());
 
 watch(
-  () => [props.branchId, props.refreshKey],
+  () => [props.branchId, props.refreshKey, dataMode.value],
   async () => {
     await nextTick();
     void fetchAppointments();
@@ -471,6 +611,23 @@ watch(
 
 :deep(.evt-past .fc-event-main) {
   opacity: 1;
+}
+
+:deep(.evt-public) {
+  opacity: 0.6;
+  filter: grayscale(0.1);
+  cursor: not-allowed;
+}
+
+:deep(.evt-dimmed) {
+  opacity: 0.25;
+  filter: grayscale(0.25);
+  pointer-events: none;
+}
+
+:deep(.evt-target) {
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.55);
+  cursor: pointer;
 }
 
 .empty-wrap {

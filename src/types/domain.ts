@@ -6,17 +6,26 @@ export interface Branch {
 
 export type AppointmentStatus = 'CONFIRMED' | 'PENDING_CONFIRMATION' | 'CANCELLED';
 
-export interface Appointment {
+/**
+ * Public / minimal appointment (used for public APIs and token views)
+ */
+export interface AppointmentMinimal {
   id: string;
-  branchId: string;
 
-  customerName: string | null;
-  customerEmail: string;
+  branchId?: string;
 
   startTime: string;
   endTime: string;
 
   status: AppointmentStatus;
+}
+
+/**
+ * Full appointment (admin view)
+ */
+export interface Appointment extends AppointmentMinimal {
+  customerName?: string | null;
+  customerEmail?: string | null;
 }
 
 export type NotificationChannel = 'EMAIL' | 'SMS' | 'WHATSAPP' | 'PUSH' | 'OTHER';
@@ -29,10 +38,10 @@ export interface AppointmentNotification {
 
   channel: NotificationChannel;
   status: NotificationStatus;
+
   sentAt: string;
 }
 
-/** API payloads */
 export interface CreateAppointmentPayload {
   branchId: string;
   customerName: string | null;

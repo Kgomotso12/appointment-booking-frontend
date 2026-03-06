@@ -26,28 +26,30 @@
           <q-spinner size="32px" />
         </div>
 
-        <template v-else-if="appointment">
+        <template v-else-if="appointmentState">
           <q-card flat bordered class="q-pa-md" style="border-radius: 12px">
             <div class="row q-col-gutter-md">
               <div class="col-12">
-                <q-chip dense :class="statusChipClass(appointment.status)" text-color="white">
-                  {{ appointment.status }}
+                <q-chip dense :class="statusChipClass(appointmentState.status)" text-color="white">
+                  {{ appointmentState.status }}
                 </q-chip>
               </div>
 
-              <div class="col-12 col-md-6">
-                <div class="meta-label">Customer</div>
-                <div class="meta-value">{{ appointment.customerName || '—' }}</div>
-              </div>
+              <template v-if="fullAppointment">
+                <div class="col-12 col-md-6">
+                  <div class="meta-label">Customer</div>
+                  <div class="meta-value">{{ fullAppointment.customerName || '—' }}</div>
+                </div>
+
+                <div class="col-12 col-md-6">
+                  <div class="meta-label">Email</div>
+                  <div class="meta-value">{{ fullAppointment.customerEmail || '—' }}</div>
+                </div>
+              </template>
 
               <div class="col-12 col-md-6">
                 <div class="meta-label">Date</div>
                 <div class="meta-value">{{ appointmentDate }}</div>
-              </div>
-
-              <div class="col-12 col-md-6">
-                <div class="meta-label">Email</div>
-                <div class="meta-value">{{ appointment.customerEmail }}</div>
               </div>
 
               <div class="col-12 col-md-6">
@@ -62,7 +64,7 @@
             </div>
           </q-card>
 
-          <div class="q-mt-md">
+          <div v-if="canSeeNotifications" class="q-mt-md">
             <div class="row items-center justify-between q-mb-sm">
               <div class="text-subtitle2 text-weight-semibold">Notifications</div>
               <q-btn
@@ -105,30 +107,46 @@
                 </q-item-section>
               </q-item>
             </q-list>
-
-            <q-banner v-if="actionError" class="q-mt-md" rounded dense inline-actions>
-              <template #avatar>
-                <q-icon name="error_outline" />
-              </template>
-              {{ actionError }}
-            </q-banner>
           </div>
+
+          <q-banner v-if="actionError" class="q-mt-md" rounded dense inline-actions>
+            <template #avatar>
+              <q-icon name="error_outline" />
+            </template>
+            {{ actionError }}
+          </q-banner>
         </template>
+
+        <q-banner v-else class="q-mt-md" rounded dense inline-actions>
+          <template #avatar>
+            <q-icon name="info_outline" />
+          </template>
+          No appointment details available.
+        </q-banner>
       </q-card-section>
 
       <q-separator />
 
       <q-card-actions align="between" class="q-px-lg q-py-md">
-        <!-- <div class="row items-center" style="gap: 8px">
+        <div class="row items-center" style="gap: 8px">
           <q-btn
-            v-if="canCancel"
+            v-if="canCancelWithToken && !canCancelAsAdmin"
             unelevated
             color="negative"
-            label="Cancel"
-            :loading="actionLoading === 'cancel'"
-            @click="handleCancelAppointment"
+            label="Cancel booking"
+            :loading="actionLoading === 'cancel_public'"
+            @click="handleCancelPublic"
           />
-        </div> -->
+
+          <q-btn
+            v-if="canCancelAsAdmin"
+            outline
+            color="negative"
+            label="Cancel (admin)"
+            :loading="actionLoading === 'cancel_admin'"
+            @click="handleCancelAdmin"
+          />
+        </div>
 
         <q-btn flat label="Close" :disable="!!actionLoading" @click="close()" />
       </q-card-actions>
@@ -139,18 +157,29 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
 import { DateTime } from 'luxon';
-import type { Appointment, AppointmentNotification, AppointmentStatus } from 'src/types/domain';
+import type {
+  Appointment,
+  AppointmentMinimal,
+  AppointmentNotification,
+  AppointmentStatus,
+} from 'src/types/domain';
 import {
   getAppointmentNotifications,
   getAppointment,
-  //cancelAppointment as apiCancelAppointment,
+  getAppointmentPublic,
+  cancelAppointment as apiCancelAppointment,
+  cancelAppointmentPublic,
 } from 'src/services/appointment.api';
+import { useAuthStore } from 'src/stores/authStore';
+import type { FriendlyAxiosError } from 'src/services/http';
 
 defineOptions({ name: 'ViewAppointmentDialog' });
 
 const props = defineProps<{
   modelValue: boolean;
   appointmentId: string | null;
+  appointment?: Appointment | AppointmentMinimal | null;
+  manageToken?: string | null;
   branchLabel: string;
   tz: string;
 }>();
@@ -166,20 +195,37 @@ const open = computed({
   set: (v: boolean) => emit('update:modelValue', v),
 });
 
+const auth = useAuthStore();
+const isAdmin = computed(() => auth.isAuthenticated && auth.isStaffOrAdmin);
+const inTokenMode = computed(
+  () => typeof props.manageToken === 'string' && props.manageToken.length > 0,
+);
+
+const canSeeNotifications = computed(() => isAdmin.value);
+
 const loading = ref(false);
-const appointment = ref<Appointment | null>(null);
+const appointmentState = ref<Appointment | AppointmentMinimal | null>(null);
 
 const notifications = ref<AppointmentNotification[]>([]);
 const notificationsLoading = ref(false);
 
-const actionLoading = ref<null | 'confirm' | 'cancel'>(null);
+const actionLoading = ref<null | 'cancel_public' | 'cancel_admin'>(null);
 const actionError = ref<string | null>(null);
+
+function isFullAppointment(a: Appointment | AppointmentMinimal | null): a is Appointment {
+  return !!a && ('customerName' in a || 'customerEmail' in a || 'customerPhone' in a);
+}
+
+const fullAppointment = computed(() =>
+  isFullAppointment(appointmentState.value) ? appointmentState.value : null,
+);
 
 function toLocal(dtISO: string) {
   return DateTime.fromISO(dtISO, { setZone: true }).setZone(props.tz);
 }
 
-function formatDateTime(dtISO: string) {
+function formatDateTime(dtISO: string | null) {
+  if (!dtISO) return '—';
   const dt = toLocal(dtISO);
   return dt.isValid ? dt.toFormat('ccc, dd LLL yyyy • HH:mm') : '—';
 }
@@ -194,33 +240,34 @@ const sentNotifications = computed(() =>
     ),
 );
 
-// const canCancel = computed(() => {
-//   const s = appointment.value?.status;
-//   return s === 'PENDING_CONFIRMATION' || s === 'CONFIRMED';
-// });
-
 const appointmentDate = computed(() => {
-  if (!appointment.value) return '';
-  const s = toLocal(appointment.value.startTime);
+  if (!appointmentState.value) return '';
+  const s = toLocal(appointmentState.value.startTime);
   return s.isValid ? s.toFormat('yyyy-LL-dd') : '—';
 });
 
 const appointmentTimeRange = computed(() => {
-  if (!appointment.value) return '';
-  const s = toLocal(appointment.value.startTime);
-  const e = toLocal(appointment.value.endTime);
+  if (!appointmentState.value) return '';
+  const s = toLocal(appointmentState.value.startTime);
+  const e = toLocal(appointmentState.value.endTime);
   if (!s.isValid || !e.isValid) return '—';
   return `${s.toFormat('HH:mm')}–${e.toFormat('HH:mm')} (${props.tz})`;
 });
 
 const headerSubtitle = computed(() => {
-  if (!appointment.value) return `Details (${props.tz})`;
-  const s = toLocal(appointment.value.startTime);
-  const e = toLocal(appointment.value.endTime);
+  if (!appointmentState.value) return `Details (${props.tz})`;
+
+  const s = toLocal(appointmentState.value.startTime);
+  const e = toLocal(appointmentState.value.endTime);
   if (!s.isValid || !e.isValid) return `Details (${props.tz})`;
-  return `${appointment.value.customerName || '—'} • ${s.toFormat(
-    'yyyy-LL-dd',
-  )} ${s.toFormat('HH:mm')}–${e.toFormat('HH:mm')} (${props.tz})`;
+
+  if (fullAppointment.value) {
+    return `${fullAppointment.value.customerName || '—'} • ${s.toFormat('yyyy-LL-dd')} ${s.toFormat(
+      'HH:mm',
+    )}–${e.toFormat('HH:mm')} (${props.tz})`;
+  }
+
+  return `${s.toFormat('yyyy-LL-dd')} ${s.toFormat('HH:mm')}–${e.toFormat('HH:mm')} (${props.tz})`;
 });
 
 function statusChipClass(status: AppointmentStatus) {
@@ -229,29 +276,53 @@ function statusChipClass(status: AppointmentStatus) {
   return 'chip-cancelled';
 }
 
+const canCancelWithToken = computed(() => {
+  if (!inTokenMode.value) return false;
+  const s = appointmentState.value?.status;
+  return s === 'PENDING_CONFIRMATION' || s === 'CONFIRMED';
+});
+
+const canCancelAsAdmin = computed(() => {
+  if (!isAdmin.value) return false;
+  const s = appointmentState.value?.status;
+  return s === 'PENDING_CONFIRMATION' || s === 'CONFIRMED';
+});
+
 async function loadNotifications() {
-  if (!appointment.value) return;
+  if (!appointmentState.value) return;
+  if (!canSeeNotifications.value) return;
+
   notificationsLoading.value = true;
   try {
-    notifications.value = await getAppointmentNotifications(appointment.value.id);
+    notifications.value = await getAppointmentNotifications(String(appointmentState.value.id));
   } finally {
     notificationsLoading.value = false;
   }
 }
 
 async function loadAppointment() {
-  if (!props.appointmentId) return;
-
   loading.value = true;
-  appointment.value = null;
+  appointmentState.value = null;
   notifications.value = [];
   actionError.value = null;
   actionLoading.value = null;
 
   try {
-    const a = await getAppointment(props.appointmentId);
-    appointment.value = a;
+    if (props.appointment) {
+      appointmentState.value = props.appointment;
+    } else if (isAdmin.value && props.appointmentId) {
+      appointmentState.value = await getAppointment(props.appointmentId);
+    } else if (inTokenMode.value && props.manageToken) {
+      appointmentState.value = await getAppointmentPublic(props.manageToken);
+    } else {
+      actionError.value = 'Appointment details are not available.';
+      return;
+    }
+
     await loadNotifications();
+  } catch (e) {
+    const err = e as FriendlyAxiosError;
+    actionError.value = err.friendlyMessage ?? 'Failed to load appointment';
   } finally {
     loading.value = false;
   }
@@ -271,27 +342,72 @@ watch(
   },
 );
 
+watch(
+  () => props.manageToken,
+  () => {
+    if (open.value) void loadAppointment();
+  },
+);
+
+watch(
+  () => props.appointment,
+  () => {
+    if (open.value && props.appointment) appointmentState.value = props.appointment;
+  },
+);
+
 function close() {
   open.value = false;
   emit('close');
 }
 
-// async function handleCancelAppointment() {
-//   if (!appointment.value) return;
-//   actionLoading.value = 'cancel';
-//   actionError.value = null;
+async function handleCancelPublic() {
+  if (!appointmentState.value) return;
+  if (!props.manageToken) return;
 
-//   try {
-//     await apiCancelAppointment(appointment.value.id);
-//     appointment.value = await getAppointment(appointment.value.id);
-//     await loadNotifications();
-//     emit('changed');
-//   } catch (e) {
-//     actionError.value = e instanceof Error ? e.message : 'Failed to cancel';
-//   } finally {
-//     actionLoading.value = null;
-//   }
-// }
+  actionLoading.value = 'cancel_public';
+  actionError.value = null;
+
+  try {
+    await cancelAppointmentPublic(props.manageToken);
+
+    appointmentState.value = {
+      ...appointmentState.value,
+      status: 'CANCELLED' as AppointmentStatus,
+    };
+
+    emit('changed');
+  } catch (e) {
+    const err = e as FriendlyAxiosError;
+    actionError.value = err.friendlyMessage ?? 'Failed to cancel booking';
+  } finally {
+    actionLoading.value = null;
+  }
+}
+
+async function handleCancelAdmin() {
+  if (!appointmentState.value) return;
+  if (!isAdmin.value) return;
+
+  actionLoading.value = 'cancel_admin';
+  actionError.value = null;
+
+  try {
+    await apiCancelAppointment(String(appointmentState.value.id));
+
+    const a = await getAppointment(String(appointmentState.value.id));
+    appointmentState.value = a;
+
+    await loadNotifications();
+
+    emit('changed');
+  } catch (e) {
+    const err = e as FriendlyAxiosError;
+    actionError.value = err.friendlyMessage ?? 'Failed to cancel';
+  } finally {
+    actionLoading.value = null;
+  }
+}
 </script>
 
 <style scoped>
