@@ -8,6 +8,7 @@ import {
 } from 'vue-router';
 import routes from './routes';
 import { useAuthStore } from 'src/stores/authStore';
+import pinia from 'src/stores';
 
 function getRequiredRoles(to: RouteLocationNormalized): string[] {
   const roles = to.meta?.roles;
@@ -31,7 +32,8 @@ export default defineRouter(function () {
     const requiresAuth = Boolean(to.meta?.requiresAuth);
     if (!requiresAuth) return true;
 
-    const auth = useAuthStore();
+    const auth = useAuthStore(pinia);
+
     if (!auth.isAuthenticated) {
       return {
         path: '/login',

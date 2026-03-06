@@ -2,6 +2,8 @@
 // https://v2.quasar.dev/quasar-cli-vite/quasar-config-file
 
 import { defineConfig } from '#q-app/wrappers';
+import fs from 'node:fs';
+import path from 'node:path';
 
 export default defineConfig((/* ctx */) => {
   return {
@@ -11,7 +13,7 @@ export default defineConfig((/* ctx */) => {
     // app boot file (/src/boot)
     // --> boot files are part of "main.js"
     // https://v2.quasar.dev/quasar-cli-vite/boot-files
-    boot: ['pinia'],
+    boot: [],
 
     // https://v2.quasar.dev/quasar-cli-vite/quasar-config-file#css
     css: ['app.scss'],
@@ -79,12 +81,17 @@ export default defineConfig((/* ctx */) => {
 
     // Full list of options: https://v2.quasar.dev/quasar-cli-vite/quasar-config-file#devserver
     devServer: {
-      // https: true,
-      open: true, // opens browser window automatically
+      open: true,
+      port: 9000,
+      https: {
+        key: fs.readFileSync(path.resolve(__dirname, './certs/frontend.key')),
+        cert: fs.readFileSync(path.resolve(__dirname, './certs/frontend.crt')),
+      },
       proxy: {
         '/api': {
-          target: 'http://localhost:8080',
+          target: 'https://localhost:8443',
           changeOrigin: true,
+          secure: false,
         },
       },
     },
