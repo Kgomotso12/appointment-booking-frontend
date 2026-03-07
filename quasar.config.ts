@@ -2,8 +2,19 @@
 // https://v2.quasar.dev/quasar-cli-vite/quasar-config-file
 
 import { defineConfig } from '#q-app/wrappers';
+import fs from 'node:fs';
+import path from 'node:path';
 
-export default defineConfig((/* ctx */) => {
+export default defineConfig((ctx) => {
+  const isDev = ctx.dev;
+
+  const devHttps = isDev
+    ? {
+        key: fs.readFileSync(path.resolve(__dirname, './certs/frontend.key')),
+        cert: fs.readFileSync(path.resolve(__dirname, './certs/frontend.crt')),
+      }
+    : undefined;
+
   return {
     // https://v2.quasar.dev/quasar-cli-vite/prefetch-feature
     // preFetch: true,
@@ -79,8 +90,16 @@ export default defineConfig((/* ctx */) => {
 
     // Full list of options: https://v2.quasar.dev/quasar-cli-vite/quasar-config-file#devserver
     devServer: {
-      // https: true,
-      open: true, // opens browser window automatically
+      open: true,
+      port: 9000,
+      https: devHttps,
+      proxy: {
+        '/api': {
+          target: 'https://localhost:8443',
+          changeOrigin: true,
+          secure: false,
+        },
+      },
     },
 
     // https://v2.quasar.dev/quasar-cli-vite/quasar-config-file#framework
@@ -98,7 +117,7 @@ export default defineConfig((/* ctx */) => {
       // directives: [],
 
       // Quasar plugins
-      plugins: [],
+      plugins: ['Notify', 'Dialog'],
     },
 
     // animations: 'all', // --- includes all animations
