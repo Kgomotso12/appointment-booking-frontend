@@ -21,8 +21,4 @@ COPY --from=build /app/dist/spa /usr/share/nginx/html
 # Copy nginx config
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 
-# Copy TLS certificates
-COPY certs/frontend.crt /etc/nginx/certs/frontend.crt
-COPY certs/frontend.key /etc/nginx/certs/frontend.key
-
 EXPOSE 443
