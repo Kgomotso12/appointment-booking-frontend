@@ -12,6 +12,9 @@ services:
       - NODE_ENV=production
     networks:
       - appointment-net
+    volumes:
+      - ./certs/frontend.crt:/etc/nginx/certs/frontend.crt:ro
+      - ./certs/frontend.key:/etc/nginx/certs/frontend.key:ro
 
 networks:
   appointment-net:
