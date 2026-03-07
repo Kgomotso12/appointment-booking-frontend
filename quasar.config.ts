@@ -5,7 +5,16 @@ import { defineConfig } from '#q-app/wrappers';
 import fs from 'node:fs';
 import path from 'node:path';
 
-export default defineConfig((/* ctx */) => {
+export default defineConfig((ctx) => {
+  const isDev = ctx.dev;
+
+  const devHttps = isDev
+    ? {
+        key: fs.readFileSync(path.resolve(__dirname, './certs/frontend.key')),
+        cert: fs.readFileSync(path.resolve(__dirname, './certs/frontend.crt')),
+      }
+    : undefined;
+
   return {
     // https://v2.quasar.dev/quasar-cli-vite/prefetch-feature
     // preFetch: true,
@@ -83,10 +92,7 @@ export default defineConfig((/* ctx */) => {
     devServer: {
       open: true,
       port: 9000,
-      https: {
-        key: fs.readFileSync(path.resolve(__dirname, './certs/frontend.key')),
-        cert: fs.readFileSync(path.resolve(__dirname, './certs/frontend.crt')),
-      },
+      https: devHttps,
       proxy: {
         '/api': {
           target: 'https://localhost:8443',
