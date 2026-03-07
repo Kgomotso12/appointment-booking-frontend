@@ -37,12 +37,14 @@ Install the following before running the project:
 
 - Node.js 20+
 - npm
+- Docker (optional for containerized deployment)
 
 Check installation:
 
 ```bash
 node -v
 npm -v
+docker -v
 ```
 
 ---
@@ -211,6 +213,145 @@ These files can be served by **Nginx** or any static file server.
 
 ---
 
+# Run with Docker
+
+The frontend can also be built and served using Docker. The production build is generated and served with **Nginx**.
+
+---
+
+## Build Docker Image
+
+From the project root run:
+
+```bash
+docker build -t appointment-booking-frontend .
+```
+
+---
+
+## Run Container
+
+```bash
+docker run \
+  --network appointment-net \
+  -p 9000:80 \
+  -p 9443:443 \
+  appointment-booking-frontend
+
+```
+
+The application will be available at:
+
+```
+https://localhost:9443
+```
+
+---
+
+# Docker Architecture
+
+The Docker image uses a **multi-stage build**.
+
+### Stage 1 – Build
+
+A Node container installs dependencies and builds the Quasar production bundle.
+
+### Stage 2 – Runtime
+
+An Nginx container serves the compiled SPA.
+
+```
+Node (build stage)
+   │
+   │ npm install
+   │ quasar build
+   ▼
+dist/spa
+   │
+   ▼
+Nginx (runtime stage)
+   │
+   ▼
+Browser
+```
+
+---
+
+# Dockerfile Overview
+
+The project uses a multi-stage Docker build:
+
+```dockerfile
+# ---- build ----
+FROM node:20-alpine AS build
+WORKDIR /app
+
+COPY . .
+RUN npm install
+RUN npm run build
+
+# ---- runtime ----
+FROM nginx:1.27.0-alpine3.19
+
+COPY --from=build /app/dist/spa /usr/share/nginx/html
+COPY nginx.conf /etc/nginx/conf.d/default.conf
+
+EXPOSE 80
+```
+
+---
+
+# Docker + Backend
+
+When running the backend locally, the frontend will call the backend API via:
+
+```
+https://localhost:8443/api
+```
+
+Ensure the backend service is running before accessing the frontend.
+
+---
+
+# Running Both Services
+
+Typical local development setup:
+
+```
+Browser
+   │
+   │ https://localhost:9443
+   ▼
+Frontend (Quasar Dev Server)
+   │
+   │ /api
+   ▼
+Backend (Spring Boot)
+```
+
+Docker production setup:
+
+```
+Browser
+   │
+   │ http://localhost:9000
+   ▼
+Frontend (Nginx container)
+   │
+   │ /api
+   ▼
+Backend (Spring Boot)
+```
+
+Example ports:
+
+```
+Frontend → 9443
+Backend  → 8443
+```
+
+---
+
 # Production Architecture
 
 Typical production setup:
@@ -234,6 +375,7 @@ In production, TLS is usually terminated at **Nginx** using certificates from **
 # Notes
 
 - Local certificates are only for development.
+- Docker serves the **production build**, not the development server.
 - Production should use trusted certificates.
 
 ---
